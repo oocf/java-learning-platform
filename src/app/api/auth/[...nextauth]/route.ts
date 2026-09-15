@@ -25,7 +25,7 @@ export const authOptions = {
                     const user = await res.json();
 
                     if (res.ok && user) {
-                        return user; // user object should contain the JWT token
+                        return { ...user, name: credentials.username, username: credentials.username };
                     }
                     return null;
                 } catch (error) {
@@ -39,11 +39,13 @@ export const authOptions = {
         async jwt({ token, user }: any) {
             if (user) {
                 token.accessToken = (user as any).token;
+                token.user = user;
             }
             return token;
         },
         async session({ session, token }: any) {
             session.accessToken = token.accessToken;
+            session.user = token.user as any;
             return session;
         }
     },

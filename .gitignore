@@ -29,12 +29,16 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+*.log
 
 # env files (can opt-in for committing if needed)
 .env*
 
 # vercel
 .vercel
+
+# generated lesson content cache
+/.lesson-cache
 
 # typescript
 *.tsbuildinfo

@@ -4,8 +4,9 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-export default function SignIn() {
+export default function SignUp() {
     const [username, setUsername] = useState('');
+    const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
@@ -16,17 +17,36 @@ export default function SignIn() {
         setLoading(true);
         setError('');
 
-        const result = await signIn('credentials', {
-            username,
-            password,
-            redirect: false,
-        });
+        try {
+            const res = await fetch('/api/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, email, password }),
+            });
 
-        if (result?.error) {
-            setError('Usuario o contraseña incorrectos');
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                setError(data.error || 'Ese usuario o correo ya existe.');
+                setLoading(false);
+                return;
+            }
+
+            const result = await signIn('credentials', {
+                username,
+                password,
+                redirect: false,
+            });
+
+            if (result?.error) {
+                setError('Cuenta creada, pero no se pudo iniciar sesión automáticamente.');
+                setLoading(false);
+                return;
+            }
+
+            router.push('/placement-quiz');
+        } catch (err) {
+            setError('El servicio de registro no está disponible en este momento.');
             setLoading(false);
-        } else {
-            router.push('/dashboard');
         }
     };
 
@@ -34,9 +54,9 @@ export default function SignIn() {
         <div className="hero">
             <div className="container">
                 <div className="glass-card" style={{ maxWidth: '400px', margin: '0 auto', textAlign: 'center', padding: '2.5rem' }}>
-                    <h2 style={{ marginBottom: '1rem', fontSize: '2rem' }}>Bienvenido de Nuevo</h2>
+                    <h2 style={{ marginBottom: '1rem', fontSize: '2rem' }}>Crea tu Cuenta</h2>
                     <p style={{ color: 'var(--text-muted)', marginBottom: '2rem' }}>
-                        Inicia sesión para continuar tu viaje de aprendizaje.
+                        Empieza tu viaje de aprendizaje en Java.
                     </p>
 
                     <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -46,6 +66,16 @@ export default function SignIn() {
                                 type="text"
                                 value={username}
                                 onChange={(e) => setUsername(e.target.value)}
+                                style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', padding: '0.75rem', borderRadius: '0.5rem', color: 'white' }}
+                                required
+                            />
+                        </div>
+                        <div style={{ textAlign: 'left' }}>
+                            <label style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.5rem' }}>Correo</label>
+                            <input
+                                type="email"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
                                 style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', padding: '0.75rem', borderRadius: '0.5rem', color: 'white' }}
                                 required
                             />
@@ -69,12 +99,12 @@ export default function SignIn() {
                             style={{ width: '100%', marginTop: '1rem', height: '3rem' }}
                             disabled={loading}
                         >
-                            {loading ? 'Iniciando sesión...' : 'Iniciar Sesión'}
+                            {loading ? 'Creando cuenta...' : 'Registrarme'}
                         </button>
                     </form>
 
                     <p style={{ marginTop: '2rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                        ¿No tienes cuenta? <Link href="/auth/signup" style={{ color: 'var(--primary)' }}>Regístrate</Link>
+                        ¿Ya tienes cuenta? <Link href="/auth/signin" style={{ color: 'var(--primary)' }}>Inicia sesión</Link>
                     </p>
                 </div>
             </div>

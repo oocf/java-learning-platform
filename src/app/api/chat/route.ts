@@ -1,5 +1,27 @@
 import { NextResponse } from "next/server";
 import { Ollama } from "ollama";
+import fs from "fs";
+import path from "path";
+
+// Lessons are generated once per lessonId and cached to disk so the same
+// lesson shows the same content on every future open, instead of the LLM
+// producing different wording (and a different challenge question) each time.
+const CACHE_DIR = path.join(process.cwd(), ".lesson-cache");
+
+function readCachedLesson(lessonId: string) {
+    const file = path.join(CACHE_DIR, `${lessonId}.json`);
+    if (!fs.existsSync(file)) return null;
+    try {
+        return JSON.parse(fs.readFileSync(file, "utf-8"));
+    } catch {
+        return null;
+    }
+}
+
+function writeCachedLesson(lessonId: string, data: unknown) {
+    fs.mkdirSync(CACHE_DIR, { recursive: true });
+    fs.writeFileSync(path.join(CACHE_DIR, `${lessonId}.json`), JSON.stringify(data, null, 2));
+}
 
 // Use environment variables for security and flexibility
 const OLLAMA_HOST = process.env.OLLAMA_HOST || "https://ollama.com";
@@ -40,11 +62,19 @@ Reglas:
 5. TODO EL CONTENIDO DEBE ESTAR EN ESPAÑOL.
 `;
 
+const SAFE_ID_PATTERN = /^[a-z0-9-]+$/;
+
 export async function POST(req: Request) {
     try {
-        const { objective, action } = await req.json();
+        const { objective, action, lessonId } = await req.json();
+        const cacheKey = typeof lessonId === "string" && SAFE_ID_PATTERN.test(lessonId) ? lessonId : null;
 
         if (action === "generate") {
+            if (cacheKey) {
+                const cached = readCachedLesson(cacheKey);
+                if (cached) return NextResponse.json(cached);
+            }
+
             const response = await ollama.chat({
                 model: MODEL_NAME,
                 messages: [{ role: 'user', content: getSystemPrompt(objective) }],
@@ -61,6 +91,7 @@ export async function POST(req: Request) {
                 const jsonString = content.substring(jsonStart, jsonEnd);
 
                 const lessonData = JSON.parse(jsonString);
+                if (cacheKey) writeCachedLesson(cacheKey, lessonData);
                 return NextResponse.json(lessonData);
             } catch (parseError) {
                 console.error("JSON Parse Error. Content received:", content);

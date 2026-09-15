@@ -1,15 +1,64 @@
 "use client";
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Sparkles, CheckCircle2, Lock, Play } from 'lucide-react';
-import { curriculum, Lesson } from '@/lib/curriculum';
+import { curriculum, Lesson, StudentLevel, isModuleUnlocked } from '@/lib/curriculum';
 import TutorHelpButton from "../tutor/TutorHelpButton";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useSession, signOut } from 'next-auth/react';
+import { useRouter } from 'next/navigation';
 
 export default function Dashboard() {
     const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
     const [completedLessons, setCompletedLessons] = useState<string[]>([]);
+    const [level, setLevel] = useState<StudentLevel | null>(null);
+    const [successRate, setSuccessRate] = useState<number>(0);
+    const [profileLoading, setProfileLoading] = useState(true);
+    const { data: session, status } = useSession();
+    const router = useRouter();
+
+    useEffect(() => {
+        if (status === 'unauthenticated') {
+            router.push('/auth/signin');
+        }
+    }, [status, router]);
+
+    useEffect(() => {
+        if (status !== 'authenticated') return;
+        fetch('/api/profile')
+            .then(async (res) => {
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    // Session cookie is still valid but the backend JWT inside it expired
+                    // (or the backend is unreachable) — force a fresh login rather than
+                    // misreading this as "student never took the placement quiz".
+                    await signOut({ redirect: false });
+                    router.push('/auth/signin');
+                    return;
+                }
+                if (!data.level) {
+                    router.push('/placement-quiz');
+                    return;
+                }
+                setLevel(data.level);
+                setSuccessRate(data.successRate ?? 0);
+
+                fetch('/api/lessons/progress')
+                    .then((r) => r.json())
+                    .then((completed) => {
+                        if (Array.isArray(completed)) setCompletedLessons(completed);
+                    })
+                    .catch(() => {});
+            })
+            .finally(() => setProfileLoading(false));
+    }, [status, router]);
+
+    if (status === 'loading' || profileLoading) {
+        return <div style={{ minHeight: '100vh', background: 'var(--bg-dark)', color: 'white', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>Cargando...</div>;
+    }
+
+    if (!session || !level) return null;
 
     return (
         <div style={{ minHeight: '100vh', background: 'var(--bg-dark)', color: 'white' }}>
@@ -22,10 +71,26 @@ export default function Dashboard() {
                     <h1 style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>Java Master Path</h1>
                 </div>
                 <div style={{ display: 'flex', gap: '2rem', alignItems: 'center' }}>
+                    <span>Hola, <strong>{session.user?.name || 'Estudiante'}</strong></span>
+
+                    <button onClick={() => signOut()} style={{
+                                background: 'rgba(239, 68, 68, 0.1)',
+                                border: '1px solid #ef4444',
+                                color: '#fca5a5',
+                                padding: '0.4rem 0.8rem',
+                                borderRadius: '0.5rem',
+                                fontSize: '0.8rem',
+                                cursor: 'pointer',
+                                fontWeight: 'bold'
+                            }}
+                        >
+                            Cerrar Sesión
+                        </button>
+
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
                         <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Progreso Total</span>
                         <div style={{ width: '150px', height: '8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', marginTop: '4px' }}>
-                            <div style={{ width: '10%', height: '100%', background: '#22c55e', borderRadius: '4px' }}></div>
+                            <div style={{ width: `${successRate}%`, height: '100%', background: '#22c55e', borderRadius: '4px' }}></div>
                         </div>
                     </div>
                     <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'var(--bg-card)', border: '1px solid var(--border)' }}></div>
@@ -33,21 +98,23 @@ export default function Dashboard() {
             </header>
 
             <main className="path-container">
-                {curriculum.map((module, mIdx) => (
-                    <div key={module.id} style={{ width: '100%' }}>
+                {curriculum.map((module, mIdx) => {
+                    const moduleUnlocked = isModuleUnlocked(module.level, level);
+                    return (
+                    <div key={module.id} style={{ width: '100%', opacity: moduleUnlocked ? 1 : 0.4 }}>
                         <motion.div
                             initial={{ opacity: 0, y: 20 }}
                             whileInView={{ opacity: 1, y: 0 }}
                             className="module-header"
                         >
                             <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{module.title}</h2>
-                            <p style={{ opacity: 0.9 }}>Módulo {mIdx + 1}</p>
+                            <p style={{ opacity: 0.9 }}>Módulo {mIdx + 1} {!moduleUnlocked && '🔒'}</p>
                         </motion.div>
 
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3rem', marginTop: '2rem' }}>
                             {module.lessons.map((lesson, lIdx) => {
                                 const isCompleted = completedLessons.includes(lesson.id);
-                                const isAvailable = lIdx === 0 || completedLessons.includes(module.lessons[lIdx - 1].id);
+                                const isAvailable = moduleUnlocked && (lIdx === 0 || completedLessons.includes(module.lessons[lIdx - 1].id));
 
                                 return (
                                     <motion.div
@@ -74,7 +141,8 @@ export default function Dashboard() {
                             })}
                         </div>
                     </div>
-                ))}
+                    );
+                })}
             </main>
 
             {/* Lesson Runner Overlay */}
@@ -82,9 +150,11 @@ export default function Dashboard() {
                 {selectedLesson && (
                     <LessonRunner
                         lesson={selectedLesson}
+                        level={level}
                         onClose={() => setSelectedLesson(null)}
                         onComplete={() => {
                             setCompletedLessons([...completedLessons, selectedLesson.id]);
+                            fetch(`/api/lessons/progress/${encodeURIComponent(selectedLesson.id)}`, { method: 'POST' }).catch(() => {});
                             setSelectedLesson(null);
                         }}
                     />
@@ -94,7 +164,7 @@ export default function Dashboard() {
     );
 }
 
-function LessonRunner({ lesson, onClose, onComplete }: { lesson: Lesson, onClose: () => void, onComplete: () => void }) {
+function LessonRunner({ lesson, level, onClose, onComplete }: { lesson: Lesson, level: StudentLevel | null, onClose: () => void, onComplete: () => void }) {
     const [cards, setCards] = useState<any[]>([]);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [isLoading, setIsLoading] = useState(true);
@@ -110,7 +180,7 @@ function LessonRunner({ lesson, onClose, onComplete }: { lesson: Lesson, onClose
             const res = await fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ objective: lesson.objective, action: 'generate' }),
+                body: JSON.stringify({ objective: lesson.objective, action: 'generate', lessonId: lesson.id }),
             });
             const data = await res.json();
             if (data.error) throw new Error(data.error);
@@ -239,7 +309,7 @@ function LessonRunner({ lesson, onClose, onComplete }: { lesson: Lesson, onClose
                                         style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', padding: '1rem', borderRadius: '0.5rem', color: 'white', fontSize: '1.1rem', outline: 'none' }}
                                     />
                                     <div style={{ marginTop: '0.5rem', textAlign: 'right' }}>
-                                        <TutorHelpButton exerciseId={lesson?.id || "unknown"} />
+                                        <TutorHelpButton exerciseId={lesson?.id || "unknown"} topic={lesson.module} level={level ?? undefined} />
                                     </div>
                                     {feedback && (
                                         <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ marginTop: '1rem', color: feedback.type === 'success' ? '#4ade80' : '#f87171', fontWeight: 'bold' }}>
